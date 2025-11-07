@@ -64,13 +64,11 @@ def on_button(c):
 
     if c.data == "weekday":
         s["waiting_for"] = "weekday"
-        bot.send_message(chat_id,
-            "Masukkan hari untuk OT1, OT2, OT3.
-"
-            "Contoh: `2 1 0`
-Format: OT1 OT2 OT3",
-            parse_mode="Markdown"
-        )
+     bot.send_message(chat_id,
+    "Masukkan hari untuk OT1, OT2, OT3.\n"
+    "Contoh: `2 1 0`\nFormat: OT1 OT2 OT3",
+    parse_mode="Markdown"
+)
 
     elif c.data == "weekend":
         s["waiting_for"] = "weekend"
