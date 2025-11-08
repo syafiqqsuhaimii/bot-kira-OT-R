@@ -90,7 +90,7 @@ def do_reset(chat_id, ask_rate=True):
         bot.send_message(chat_id, "Masukkan kadar OT sejam (contoh: 10.5)")
 
 # ==========================
-# COMMANDS (help/reset/ping) — masih tersedia
+# COMMANDS (help/reset/ping)
 # ==========================
 @bot.message_handler(commands=["help"])
 def help_cmd(message):
@@ -109,14 +109,16 @@ def ping(message):
         print("❌ /ping failed:", repr(e), file=sys.stderr, flush=True)
 
 # ==========================
-# CALLBACKS (inline buttons) — dengan answer_callback_query + logic
+# CALLBACKS (inline) — jawap callback di sini SAHAJA
 # ==========================
 @bot.callback_query_handler(func=lambda call: True)
 def callback(call):
     chat_id = call.message.chat.id
     data = call.data
+
+    # Jawab callback (hentikan loading)
     try:
-        bot.answer_callback_query(call.id)  # hentikan loading pada butang
+        bot.answer_callback_query(call.id)
     except Exception as e:
         print("❌ answer_callback_query failed:", repr(e), file=sys.stderr, flush=True)
 
@@ -157,7 +159,7 @@ def callback(call):
         bot.send_message(chat_id, msg, reply_markup=main_menu())
 
 # ==========================
-# UNIVERSAL HANDLER (fallback untuk teks biasa)
+# UNIVERSAL HANDLER (state machine untuk teks)
 # ==========================
 @bot.message_handler(func=lambda m: True)
 def handle_all(message):
@@ -165,7 +167,7 @@ def handle_all(message):
     text = (message.text or "").strip()
     print(f"🔎 handle_all text='{text}' chat_id={chat_id}", file=sys.stdout, flush=True)
 
-    # Fallback commands
+    # Commands fallback
     if text.startswith("/"):
         cmd = text.split()[0].lower()
         if cmd == "/start":
@@ -233,7 +235,7 @@ def handle_all(message):
         session["waiting_for"] = None
 
 # ==========================
-# FLASK WEBHOOK — termasuk debug callback direct
+# FLASK WEBHOOK — LOG callback SAHAJA (jangan answerCallback di sini)
 # ==========================
 app = Flask(__name__)
 
@@ -248,20 +250,13 @@ def webhook():
     try:
         update = telebot.types.Update.de_json(raw)
 
-        # === DIRECT HANDLING ===
         if update:
-            # a) CALLBACK QUERY DEBUG — sahkan Telegram hantar callback
+            # a) Log callback (tanpa answerCallbackQuery di sini)
             if getattr(update, "callback_query", None):
                 cq = update.callback_query
-                try:
-                    print(f"🔔 callback_query data='{cq.data}' from chat={cq.message.chat.id}", file=sys.stdout, flush=True)
-                    bot.answer_callback_query(cq.id)
-                except Exception as e:
-                    print("❌ direct answer_callback_query failed:", repr(e), file=sys.stderr, flush=True)
-                # (Optional) debug reply
-                # bot.send_message(cq.message.chat.id, f"DEBUG: callback '{cq.data}' diterima")
+                print(f"🔔 callback_query data='{cq.data}' from chat={cq.message.chat.id}", file=sys.stdout, flush=True)
 
-            # b) /start & RATE direct (supaya confirm reply)
+            # b) /start & RATE proses direct (pasti reply)
             if getattr(update, "message", None):
                 t_raw = (update.message.text or "").strip()
                 t = t_raw.lower()
@@ -272,37 +267,27 @@ def webhook():
 
                 if t == "/start":
                     user_sessions[cid] = {"rate": None, "weekday": 0.0, "weekend": 0.0, "ph": 0.0, "waiting_for": "rate"}
-                    try:
-                        bot.send_message(cid, "Masukkan kadar OT sejam (contoh: 10.5)")
-                        print("✅ Direct /start → ask rate", file=sys.stdout, flush=True)
-                    except Exception as ee:
-                        print("❌ Direct /start send failed:", repr(ee), file=sys.stderr, flush=True)
+                    bot.send_message(cid, "Masukkan kadar OT sejam (contoh: 10.5)")
+                    print("✅ Direct /start → ask rate", file=sys.stdout, flush=True)
 
                 elif t == "/ping":
-                    try:
-                        bot.send_message(cid, "pong ✅ direct")
-                        print("✅ Direct /ping reply sent", file=sys.stdout, flush=True)
-                    except Exception as ee:
-                        print("❌ Direct /ping send failed:", repr(ee), file=sys.stderr, flush=True)
+                    bot.send_message(cid, "pong ✅ direct")
+                    print("✅ Direct /ping reply sent", file=sys.stdout, flush=True)
 
                 else:
                     sess = user_sessions.get(cid, {})
                     waiting = sess.get("waiting_for")
                     if (waiting == "rate" or sess.get("rate") is None) and is_number(t_raw):
-                        try:
-                            rate = float(t_raw.replace(",", "."))
-                            sess["rate"] = rate
-                            sess["waiting_for"] = None
-                            bot.send_message(cid, f"✅ Rate OT diset: RM {rate:.2f}/jam")
-                            send_main_buttons(cid)  # butang inline keluar di sini
-                            print(f"✅ Direct rate set to {rate} for {cid}", file=sys.stdout, flush=True)
-                        except Exception as ee:
-                            print("❌ Direct rate send failed:", repr(ee), file=sys.stderr, flush=True)
+                        rate = float(t_raw.replace(",", "."))
+                        sess["rate"] = rate
+                        sess["waiting_for"] = None
+                        bot.send_message(cid, f"✅ Rate OT diset: RM {rate:.2f}/jam")
+                        send_main_buttons(cid)  # butang inline keluar di sini
+                        print(f"✅ Direct rate set to {rate} for {cid}", file=sys.stdout, flush=True)
 
-        # Teruskan ke handlers (untuk proses penuh)
+        # Serahkan ke handlers (termasuk callback handler yang akan answerCallbackQuery dengan segera)
         bot.process_new_updates([update])
         print("✅ Update processed OK", file=sys.stdout, flush=True)
-
     except Exception as e:
         print("❌ Error processing update:", repr(e), file=sys.stderr, flush=True)
     return "OK", 200
