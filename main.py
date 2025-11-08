@@ -62,30 +62,6 @@ def send_main_buttons(chat_id):
     bot.send_message(chat_id, "Sila pilih jenis OT:", reply_markup=markup)
 
 # ==========================
-# /start
-# ==========================
-@bot.message_handler(commands=["start"])
-def start(message):
-    user_sessions[message.chat.id] = {
-        "rate": None,
-        "weekday": 0.0,
-        "weekend": 0.0,
-        "ph": 0.0,
-        "waiting_for": None,
-    }
-    try:
-        bot.send_message(
-            message.chat.id,
-            "Hai! Ini DBSB OT Calculator.\n"
-            "Masukkan kadar OT sejam (contoh: 10.5)\n\n"
-            "Bantuan: /help  |  Reset: /reset\n"
-            "Administrator: @syafiqqsuhaimii"
-        )
-        print("✅ /start reply sent to", message.chat.id, file=sys.stdout, flush=True)
-    except Exception as e:
-        print("❌ Failed to send /start reply:", repr(e), file=sys.stderr, flush=True)
-
-# ==========================
 # /help
 # ==========================
 @bot.message_handler(commands=["help"])
@@ -203,19 +179,37 @@ def callback(call):
 def handle_user_input(message):
     chat_id = message.chat.id
     text = (message.text or "").strip()
+    print(f"🔎 handle_user_input text='{text}' chat_id={chat_id}", file=sys.stdout, flush=True)
 
-    # ---- Command fallback (pastikan /start jalan walaupun command handler tak trigger) ----
+    # ---- Command fallback (PASTIKAN /start SENTIASA BALAS) ----
     if text.startswith("/"):
         cmd = text.split()[0].lower()
+
+        # === FORCE /start reply here ===
         if cmd == "/start":
-            return start(message)
+            user_sessions[chat_id] = {
+                "rate": None, "weekday": 0.0, "weekend": 0.0, "ph": 0.0, "waiting_for": None
+            }
+            try:
+                bot.send_message(
+                    chat_id,
+                    "Hai! Ini DBSB OT Calculator.\n"
+                    "Masukkan kadar OT sejam (contoh: 10.5)\n\n"
+                    "Bantuan: /help  |  Reset: /reset\n"
+                    "Administrator: @syafiqqsuhaimii"
+                )
+                print("✅ /start fallback reply sent", file=sys.stdout, flush=True)
+            except Exception as e:
+                print("❌ /start fallback failed:", repr(e), file=sys.stderr, flush=True)
+            return
+
         if cmd == "/help":
             return help_cmd(message)
         if cmd == "/reset":
             return reset_cmd(message)
         if cmd == "/ping":
             return ping(message)
-        # Jika command lain, biarkan jatuh ke bawah (ignore)
+        # Command lain → ignore dan teruskan
 
     # Pastikan session wujud
     session = user_sessions.get(chat_id)
@@ -294,11 +288,13 @@ def webhook():
     try:
         update = telebot.types.Update.de_json(raw)
 
-        # ---- DIRECT DEBUG REPLY: jika /ping, balas terus dari webhook (bypass handlers) ----
+        # Direct debug reply for /ping (bypass handlers) — confirm sending works
         try:
-            if update and update.message and (update.message.text or "").strip().lower() == "/ping":
-                bot.send_message(update.message.chat.id, "pong ✅ direct")
-                print("✅ Direct /ping reply sent from webhook", file=sys.stdout, flush=True)
+            if update and update.message:
+                t = (update.message.text or "").strip().lower()
+                if t == "/ping":
+                    bot.send_message(update.message.chat.id, "pong ✅ direct")
+                    print("✅ Direct /ping reply sent from webhook", file=sys.stdout, flush=True)
         except Exception as ee:
             print("❌ Direct /ping reply failed:", repr(ee), file=sys.stderr, flush=True)
 
