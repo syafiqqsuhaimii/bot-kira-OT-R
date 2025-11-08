@@ -181,11 +181,10 @@ def handle_user_input(message):
     text = (message.text or "").strip()
     print(f"🔎 handle_user_input text='{text}' chat_id={chat_id}", file=sys.stdout, flush=True)
 
-    # ---- Command fallback (PASTIKAN /start SENTIASA BALAS) ----
+    # ---- Command fallback (pastikan /start sentiasa balas) ----
     if text.startswith("/"):
         cmd = text.split()[0].lower()
 
-        # === FORCE /start reply here ===
         if cmd == "/start":
             user_sessions[chat_id] = {
                 "rate": None, "weekday": 0.0, "weekend": 0.0, "ph": 0.0, "waiting_for": None
@@ -288,18 +287,40 @@ def webhook():
     try:
         update = telebot.types.Update.de_json(raw)
 
-        # Direct debug reply for /ping (bypass handlers) — confirm sending works
-        try:
-            if update and update.message:
-                t = (update.message.text or "").strip().lower()
-                if t == "/ping":
-                    bot.send_message(update.message.chat.id, "pong ✅ direct")
-                    print("✅ Direct /ping reply sent from webhook", file=sys.stdout, flush=True)
-        except Exception as ee:
-            print("❌ Direct /ping reply failed:", repr(ee), file=sys.stderr, flush=True)
+        # === DIRECT HANDLING (bypass handlers) ===
+        if update and update.message:
+            t = (update.message.text or "").strip().lower()
+            cid = update.message.chat.id
 
+            # /ping → balas direct (debug)
+            if t == "/ping":
+                try:
+                    bot.send_message(cid, "pong ✅ direct")
+                    print("✅ Direct /ping reply sent from webhook", file=sys.stdout, flush=True)
+                except Exception as ee:
+                    print("❌ Direct /ping reply failed:", repr(ee), file=sys.stderr, flush=True)
+
+            # /start → init session + balas direct (force)
+            if t == "/start":
+                user_sessions[cid] = {
+                    "rate": None, "weekday": 0.0, "weekend": 0.0, "ph": 0.0, "waiting_for": None
+                }
+                try:
+                    bot.send_message(
+                        cid,
+                        "Hai! Ini DBSB OT Calculator.\n"
+                        "Masukkan kadar OT sejam (contoh: 10.5)\n\n"
+                        "Bantuan: /help  |  Reset: /reset\n"
+                        "Administrator: @syafiqqsuhaimii"
+                    )
+                    print("✅ Direct /start reply sent from webhook", file=sys.stdout, flush=True)
+                except Exception as ee:
+                    print("❌ Direct /start reply failed:", repr(ee), file=sys.stderr, flush=True)
+
+        # Teruskan ke handlers biasa (weekday/weekend/PH/total dsb)
         bot.process_new_updates([update])
         print("✅ Update processed OK", file=sys.stdout, flush=True)
+
     except Exception as e:
         print("❌ Error processing update:", repr(e), file=sys.stderr, flush=True)
     return "OK", 200
