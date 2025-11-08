@@ -137,7 +137,7 @@ def ping(message):
 # ==========================
 # SET RATE (sekali sahaja)
 # ==========================
-@bot.message_handler(func=lambda m: m.text.replace(".", "", 1).isdigit()
+@bot.message_handler(func=lambda m: m.text and m.text.replace(".", "", 1).isdigit()
                      and (user_sessions.get(m.chat.id, {}).get("rate") is None))
 def set_rate(message):
     rate = float(message.text)
@@ -293,6 +293,15 @@ def webhook():
     print("✅ /webhook received:", raw[:400], file=sys.stdout, flush=True)
     try:
         update = telebot.types.Update.de_json(raw)
+
+        # ---- DIRECT DEBUG REPLY: jika /ping, balas terus dari webhook (bypass handlers) ----
+        try:
+            if update and update.message and (update.message.text or "").strip().lower() == "/ping":
+                bot.send_message(update.message.chat.id, "pong ✅ direct")
+                print("✅ Direct /ping reply sent from webhook", file=sys.stdout, flush=True)
+        except Exception as ee:
+            print("❌ Direct /ping reply failed:", repr(ee), file=sys.stderr, flush=True)
+
         bot.process_new_updates([update])
         print("✅ Update processed OK", file=sys.stdout, flush=True)
     except Exception as e:
