@@ -109,12 +109,17 @@ def ping(message):
         print("❌ /ping failed:", repr(e), file=sys.stderr, flush=True)
 
 # ==========================
-# CALLBACKS (inline buttons)
+# CALLBACKS (inline buttons) — dengan answer_callback_query + logic
 # ==========================
 @bot.callback_query_handler(func=lambda call: True)
 def callback(call):
     chat_id = call.message.chat.id
     data = call.data
+    try:
+        bot.answer_callback_query(call.id)  # hentikan loading pada butang
+    except Exception as e:
+        print("❌ answer_callback_query failed:", repr(e), file=sys.stderr, flush=True)
+
     session = user_sessions.get(chat_id)
 
     if data == "help":
@@ -173,19 +178,21 @@ def handle_all(message):
         if cmd == "/ping":
             return ping(message)
 
-    # Jika tiada state khusus, paparkan menu jika rate dah ada
+    # Ensure session
     session = user_sessions.get(chat_id)
     if not session:
         do_reset(chat_id, ask_rate=True)
         return
 
     waiting = session.get("waiting_for")
+
+    # Waiting: rate diurus di webhook (direct). Di sini hanya OT inputs.
     if not waiting:
         if session.get("rate") is not None and not is_number(text):
             return send_main_buttons(chat_id)
         return
 
-    # Waiting untuk isian OT (weekday/weekend/ph) — rate akan diurus di webhook
+    # Waiting untuk OT inputs
     rate = session["rate"]
     try:
         if waiting == "weekday":
@@ -226,7 +233,7 @@ def handle_all(message):
         session["waiting_for"] = None
 
 # ==========================
-# FLASK WEBHOOK
+# FLASK WEBHOOK — termasuk debug callback direct
 # ==========================
 app = Flask(__name__)
 
@@ -241,49 +248,58 @@ def webhook():
     try:
         update = telebot.types.Update.de_json(raw)
 
-        # === DIRECT HANDLING: /start dan RATE (numeric) diproses terus di webhook ===
-        if update and update.message:
-            t = (update.message.text or "").strip()
-            t_lower = t.lower()
-            cid = update.message.chat.id
-
-            # Pastikan session wujud
-            if cid not in user_sessions:
-                user_sessions[cid] = {"rate": None, "weekday": 0.0, "weekend": 0.0, "ph": 0.0, "waiting_for": None}
-
-            # /start → minta rate & set state "rate"
-            if t_lower == "/start":
-                user_sessions[cid] = {"rate": None, "weekday": 0.0, "weekend": 0.0, "ph": 0.0, "waiting_for": "rate"}
+        # === DIRECT HANDLING ===
+        if update:
+            # a) CALLBACK QUERY DEBUG — sahkan Telegram hantar callback
+            if getattr(update, "callback_query", None):
+                cq = update.callback_query
                 try:
-                    bot.send_message(cid, "Masukkan kadar OT sejam (contoh: 10.5)")
-                    print("✅ Direct /start → ask rate", file=sys.stdout, flush=True)
-                except Exception as ee:
-                    print("❌ Direct /start send failed:", repr(ee), file=sys.stderr, flush=True)
+                    print(f"🔔 callback_query data='{cq.data}' from chat={cq.message.chat.id}", file=sys.stdout, flush=True)
+                    bot.answer_callback_query(cq.id)
+                except Exception as e:
+                    print("❌ direct answer_callback_query failed:", repr(e), file=sys.stderr, flush=True)
+                # (Optional) debug reply
+                # bot.send_message(cq.message.chat.id, f"DEBUG: callback '{cq.data}' diterima")
 
-            # /ping → balas terus
-            elif t_lower == "/ping":
-                try:
-                    bot.send_message(cid, "pong ✅ direct")
-                    print("✅ Direct /ping reply sent", file=sys.stdout, flush=True)
-                except Exception as ee:
-                    print("❌ Direct /ping send failed:", repr(ee), file=sys.stderr, flush=True)
+            # b) /start & RATE direct (supaya confirm reply)
+            if getattr(update, "message", None):
+                t_raw = (update.message.text or "").strip()
+                t = t_raw.lower()
+                cid = update.message.chat.id
 
-            # RATE: jika state "rate" atau rate masih None, dan teks ialah nombor → set rate & paparkan butang
-            else:
-                sess = user_sessions.get(cid, {})
-                waiting = sess.get("waiting_for")
-                if (waiting == "rate" or sess.get("rate") is None) and is_number(t):
+                if cid not in user_sessions:
+                    user_sessions[cid] = {"rate": None, "weekday": 0.0, "weekend": 0.0, "ph": 0.0, "waiting_for": None}
+
+                if t == "/start":
+                    user_sessions[cid] = {"rate": None, "weekday": 0.0, "weekend": 0.0, "ph": 0.0, "waiting_for": "rate"}
                     try:
-                        rate = float(t.replace(",", "."))
-                        sess["rate"] = rate
-                        sess["waiting_for"] = None
-                        bot.send_message(cid, f"✅ Rate OT diset: RM {rate:.2f}/jam")
-                        send_main_buttons(cid)  # <<< BUTANG MUNCUL DI SINI
-                        print(f"✅ Direct rate set to {rate} for {cid}", file=sys.stdout, flush=True)
+                        bot.send_message(cid, "Masukkan kadar OT sejam (contoh: 10.5)")
+                        print("✅ Direct /start → ask rate", file=sys.stdout, flush=True)
                     except Exception as ee:
-                        print("❌ Direct rate send failed:", repr(ee), file=sys.stderr, flush=True)
+                        print("❌ Direct /start send failed:", repr(ee), file=sys.stderr, flush=True)
 
-        # Terus proses ke handlers lain (weekday/weekend/ph/callback)
+                elif t == "/ping":
+                    try:
+                        bot.send_message(cid, "pong ✅ direct")
+                        print("✅ Direct /ping reply sent", file=sys.stdout, flush=True)
+                    except Exception as ee:
+                        print("❌ Direct /ping send failed:", repr(ee), file=sys.stderr, flush=True)
+
+                else:
+                    sess = user_sessions.get(cid, {})
+                    waiting = sess.get("waiting_for")
+                    if (waiting == "rate" or sess.get("rate") is None) and is_number(t_raw):
+                        try:
+                            rate = float(t_raw.replace(",", "."))
+                            sess["rate"] = rate
+                            sess["waiting_for"] = None
+                            bot.send_message(cid, f"✅ Rate OT diset: RM {rate:.2f}/jam")
+                            send_main_buttons(cid)  # butang inline keluar di sini
+                            print(f"✅ Direct rate set to {rate} for {cid}", file=sys.stdout, flush=True)
+                        except Exception as ee:
+                            print("❌ Direct rate send failed:", repr(ee), file=sys.stderr, flush=True)
+
+        # Teruskan ke handlers (untuk proses penuh)
         bot.process_new_updates([update])
         print("✅ Update processed OK", file=sys.stdout, flush=True)
 
