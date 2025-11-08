@@ -75,7 +75,6 @@ def send_help(chat_id):
         "   • 📅 *Weekend* → balas *bilangan hari* (1 hari = 8 jam), cth: `2`.\n"
         "   • 🎉 *Public Holiday* → balas *jumlah jam*, cth: `9`.\n"
         "   • 💰 *Total* → lihat ringkasan kiraan.\n\n"
-        "🔁 Guna butang *Reset* untuk kosongkan data & masukkan rate baru.\n"
         "👨‍💼 Administrator: @syafiqqsuhaimii",
         parse_mode="Markdown",
         reply_markup=main_menu()
@@ -88,12 +87,11 @@ def do_reset(chat_id):
     bot.send_message(
         chat_id,
         "♻️ Data telah direset.\nSila masukkan semula *rate sejam* (cth: `10.5`).",
-        parse_mode="Markdown",
-        reply_markup=main_menu()
+        parse_mode="Markdown"
     )
 
 # ==========================
-# /help & /reset commands (kekal, tapi kita juga ada butang inline)
+# /help & /reset commands (kekal, tapi juga ada butang inline)
 # ==========================
 @bot.message_handler(commands=["help"])
 def help_cmd(message):
@@ -115,7 +113,7 @@ def ping(message):
         print("❌ /ping failed:", repr(e), file=sys.stderr, flush=True)
 
 # ==========================
-# SET RATE — pastikan sentiasa trigger
+# UTIL: detect nombor (rate)
 # ==========================
 def is_number(s: str) -> bool:
     if not s:
@@ -123,23 +121,27 @@ def is_number(s: str) -> bool:
     s = s.strip().replace(",", ".")
     return s.replace(".", "", 1).isdigit()
 
+# ==========================
+# SET RATE — hanya selepas /start, dan hanya sekali
+# ==========================
 @bot.message_handler(func=lambda m: is_number(m.text))
 def set_rate(message):
-    # Jika session belum wujud, buatkan
-    if message.chat.id not in user_sessions:
-        user_sessions[message.chat.id] = {
+    chat_id = message.chat.id
+    txt = message.text.strip().replace(",", ".")
+
+    # Wujudkan session jika tiada
+    if chat_id not in user_sessions:
+        user_sessions[chat_id] = {
             "rate": None, "weekday": 0.0, "weekend": 0.0, "ph": 0.0, "waiting_for": None
         }
 
-    # Hanya set jika rate belum diset
-    if user_sessions[message.chat.id].get("rate") is None:
-        rate = float(message.text.strip().replace(",", "."))
-        user_sessions[message.chat.id]["rate"] = rate
-        bot.send_message(message.chat.id, f"✅ Rate OT diset: RM {rate:.2f}/jam")
-        send_main_buttons(message.chat.id)
-    else:
-        # Jika rate sudah ada, anggap ini bukan rate → biar handler umum urus
-        pass
+    # Kalau rate belum diset → set & paparkan butang inline
+    if user_sessions[chat_id].get("rate") is None:
+        rate = float(txt)
+        user_sessions[chat_id]["rate"] = rate
+        bot.send_message(chat_id, f"✅ Rate OT diset: RM {rate:.2f}/jam")
+        send_main_buttons(chat_id)  # <- butang muncul hanya selepas rate
+    # Jika rate sudah ada, biarkan input nombor pergi ke handler umum (mungkin jam/weekend dll)
 
 # ==========================
 # CALLBACK HANDLER (inline)
@@ -147,21 +149,22 @@ def set_rate(message):
 @bot.callback_query_handler(func=lambda call: True)
 def callback(call):
     chat_id = call.message.chat.id
+    data = call.data
     session = user_sessions.get(chat_id)
 
-    if call.data == "help":
+    if data == "help":
         return send_help(chat_id)
-    if call.data == "reset":
-        return do_reset(chat_id)
+    if data == "reset":
+        do_reset(chat_id)
+        return  # lepas reset jangan terus ke bawah
 
     if not session or session.get("rate") is None:
         bot.send_message(chat_id, "⚠️ Sila masukkan rate sejam dahulu (cth: 10.5).")
         return
 
-    jenis = call.data
-    session["waiting_for"] = jenis
+    session["waiting_for"] = data
 
-    if jenis == "weekday":
+    if data == "weekday":
         bot.send_message(
             chat_id,
             "Masukkan hari untuk OT1, OT2, OT3.\n"
@@ -169,19 +172,19 @@ def callback(call):
             "Format: OT1 OT2 OT3",
             parse_mode="Markdown"
         )
-    elif jenis == "weekend":
+    elif data == "weekend":
         bot.send_message(
             chat_id,
             "Masukkan *bilangan hari* weekend.\n1 hari = 8 jam.\nContoh: `2`",
             parse_mode="Markdown"
         )
-    elif jenis == "ph":
+    elif data == "ph":
         bot.send_message(
             chat_id,
             "Masukkan *jumlah jam* OT Public Holiday.\nContoh: `10`",
             parse_mode="Markdown"
         )
-    elif jenis == "total":
+    elif data == "total":
         msg = (
             f"📊 Ringkasan OT:\n"
             f"🏢 Weekday: RM {session['weekday']:.2f}\n"
@@ -200,22 +203,14 @@ def handle_user_input(message):
     text = (message.text or "").strip()
     print(f"🔎 handle_user_input text='{text}' chat_id={chat_id}", file=sys.stdout, flush=True)
 
-    # Command fallback (pastikan /start sentiasa balas)
+    # Command fallback (pastikan /start sentiasa balas — tanpa ayat tambahan)
     if text.startswith("/"):
         cmd = text.split()[0].lower()
         if cmd == "/start":
-            # init session + minta rate
             user_sessions[chat_id] = {
                 "rate": None, "weekday": 0.0, "weekend": 0.0, "ph": 0.0, "waiting_for": None
             }
-            bot.send_message(
-                chat_id,
-                "Hai! Ini DBSB OT Calculator.\n"
-                "Masukkan kadar OT sejam (contoh: 10.5)\n\n"
-                "📘 Help & ♻️ Reset tersedia di butang bawah.",
-                reply_markup=main_menu()
-            )
-            print("✅ /start fallback reply sent", file=sys.stdout, flush=True)
+            bot.send_message(chat_id, "Masukkan kadar OT sejam (contoh: 10.5)")
             return
         if cmd == "/help":
             return send_help(chat_id)
@@ -230,12 +225,13 @@ def handle_user_input(message):
         user_sessions[chat_id] = {
             "rate": None, "weekday": 0.0, "weekend": 0.0, "ph": 0.0, "waiting_for": None
         }
-        bot.send_message(chat_id, "Hai! Masukkan rate sejam (cth: 10.5) atau tekan /start.", reply_markup=main_menu())
+        bot.send_message(chat_id, "Masukkan kadar OT sejam (cth: 10.5)")
         return
 
     waiting = session.get("waiting_for")
 
-    # Jika tak sedang menunggu input spesifik & rate dah ada → paparkan menu bila user hantar teks raw
+    # Jika tak sedang menunggu input spesifik:
+    # - kalau rate dah ada & user hantar teks bukan nombor → paparkan menu inline
     if not waiting:
         if session.get("rate") is not None and not is_number(text):
             send_main_buttons(chat_id)
@@ -299,7 +295,7 @@ def webhook():
     try:
         update = telebot.types.Update.de_json(raw)
 
-        # Direct debug replies: pastikan hantar OK
+        # Direct debug replies untuk /ping & /start (pastikan balas)
         if update and update.message:
             t = (update.message.text or "").strip().lower()
             cid = update.message.chat.id
@@ -310,18 +306,12 @@ def webhook():
                 except Exception as ee:
                     print("❌ Direct /ping reply failed:", repr(ee), file=sys.stderr, flush=True)
             if t == "/start":
-                # Set juga sesi dari webhook supaya confirm wujud
+                # Init session & minta rate (tiada ayat tambahan)
                 user_sessions[cid] = {
                     "rate": None, "weekday": 0.0, "weekend": 0.0, "ph": 0.0, "waiting_for": None
                 }
                 try:
-                    bot.send_message(
-                        cid,
-                        "Hai! Ini DBSB OT Calculator.\n"
-                        "Masukkan kadar OT sejam (contoh: 10.5)\n\n"
-                        "📘 Help & ♻️ Reset tersedia di butang bawah.",
-                        reply_markup=main_menu()
-                    )
+                    bot.send_message(cid, "Masukkan kadar OT sejam (contoh: 10.5)")
                     print("✅ Direct /start reply sent from webhook", file=sys.stdout, flush=True)
                 except Exception as ee:
                     print("❌ Direct /start reply failed:", repr(ee), file=sys.stderr, flush=True)
