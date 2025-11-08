@@ -1,5 +1,6 @@
 import os
 import sys
+import logging
 import telebot
 from telebot import types
 from flask import Flask, request
@@ -11,13 +12,14 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN not set in environment variables!")
 
-telebot.logger.setLevel("INFO")
+telebot.logger.setLevel(logging.DEBUG)  # verbose logs
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # ==========================
 # SESSION
 # ==========================
-user_sessions = {}  # {chat_id: {"rate": float, "weekday": float, "weekend": float, "ph": float, "waiting_for": str|None}}
+# {chat_id: {"rate": float, "weekday": float, "weekend": float, "ph": float, "waiting_for": str|None}}
+user_sessions = {}
 PRESET_WEEKDAY = {"OT1": 3, "OT2": 4, "OT3": 5}
 
 # ==========================
@@ -71,14 +73,17 @@ def start(message):
         "ph": 0.0,
         "waiting_for": None,
     }
-    bot.send_message(
-        message.chat.id,
-        "👋 Hai! Ini *DBSB OT Calculator*.\n"
-        "Masukkan kadar OT sejam (contoh: 10.5)\n\n"
-        "Bantuan: /help | Reset: /reset\n"
-        "Administrator: @syafiqqsuhaimii",
-        parse_mode="Markdown"
-    )
+    try:
+        bot.send_message(
+            message.chat.id,
+            "Hai! Ini DBSB OT Calculator.\n"
+            "Masukkan kadar OT sejam (contoh: 10.5)\n\n"
+            "Bantuan: /help  |  Reset: /reset\n"
+            "Administrator: @syafiqqsuhaimii"
+        )
+        print("✅ /start reply sent to", message.chat.id, file=sys.stdout, flush=True)
+    except Exception as e:
+        print("❌ Failed to send /start reply:", repr(e), file=sys.stderr, flush=True)
 
 # ==========================
 # /help
@@ -90,7 +95,7 @@ def help_cmd(message):
         "📘 *Cara guna:*\n"
         "1) /start → masukkan *rate sejam* (cth: `12.5`).\n"
         "2) Pilih butang:\n"
-        "   • 🏢 *Weekday* → balas `OT1 OT2 OT3` (cth: `2 1 0`) di mana OT1=3j, OT2=4j, OT3=5j.\n"
+        "   • 🏢 *Weekday* → balas `OT1 OT2 OT3` (cth: `2 1 0`) — OT1=3j, OT2=4j, OT3=5j.\n"
         "   • 📅 *Weekend* → balas *bilangan hari* (1 hari = 8 jam), cth: `2`.\n"
         "   • 🎉 *Public Holiday* → balas *jumlah jam*, cth: `9`.\n"
         "   • 💰 *Total* → lihat ringkasan kiraan.\n\n"
@@ -114,10 +119,20 @@ def reset_cmd(message):
     bot.send_message(
         message.chat.id,
         "♻️ Data anda telah direset.\n"
-        "Sila masukkan semula *rate sejam* (cth: `10.5`).\n"
-        "Administrator: @syafiqqsuhaimii",
-        parse_mode="Markdown"
+        "Sila masukkan semula rate sejam (cth: 10.5).\n"
+        "Administrator: @syafiqqsuhaimii"
     )
+
+# ==========================
+# /ping (debug)
+# ==========================
+@bot.message_handler(commands=["ping"])
+def ping(message):
+    try:
+        bot.send_message(message.chat.id, "pong")
+        print("✅ /ping replied", file=sys.stdout, flush=True)
+    except Exception as e:
+        print("❌ /ping failed:", repr(e), file=sys.stderr, flush=True)
 
 # ==========================
 # SET RATE (sekali sahaja)
@@ -232,7 +247,7 @@ def handle_user_input(message):
             "❌ Format salah. Masukkan nombor sahaja.\n"
             "Jika perlukan bantuan, hubungi admin: @syafiqqsuhaimii"
         )
-        print("Error:", e, file=sys.stderr)
+        print("❌ Handle input error:", repr(e), file=sys.stderr, flush=True)
 
     finally:
         session["waiting_for"] = None
