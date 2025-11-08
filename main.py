@@ -197,22 +197,47 @@ def callback(call):
         bot.send_message(chat_id, msg)
 
 # ==========================
-# USER INPUT (selepas tekan button)
+# USER INPUT (fallback commands + OT input)
 # ==========================
 @bot.message_handler(func=lambda m: True)
 def handle_user_input(message):
     chat_id = message.chat.id
-    session = user_sessions.get(chat_id)
+    text = (message.text or "").strip()
 
-    if not session or not session["waiting_for"]:
+    # ---- Command fallback (pastikan /start jalan walaupun command handler tak trigger) ----
+    if text.startswith("/"):
+        cmd = text.split()[0].lower()
+        if cmd == "/start":
+            return start(message)
+        if cmd == "/help":
+            return help_cmd(message)
+        if cmd == "/reset":
+            return reset_cmd(message)
+        if cmd == "/ping":
+            return ping(message)
+        # Jika command lain, biarkan jatuh ke bawah (ignore)
+
+    # Pastikan session wujud
+    session = user_sessions.get(chat_id)
+    if not session:
+        user_sessions[chat_id] = {
+            "rate": None, "weekday": 0.0, "weekend": 0.0, "ph": 0.0, "waiting_for": None
+        }
+        bot.send_message(chat_id, "Hai! Masukkan kadar OT sejam (cth: 10.5) atau taip /start.")
         return
 
-    jenis = session["waiting_for"]
-    rate = session["rate"]
+    waiting = session.get("waiting_for")
+    if not waiting:
+        # Jika rate dah diset dan user bukan bagi nombor (bukan set_rate), tunjuk menu
+        if session.get("rate") is not None and not text.replace(".", "", 1).isdigit():
+            send_main_buttons(chat_id)
+        return
 
+    # ===== Dari sini: memang sedang menunggu input OT =====
+    rate = session["rate"]
     try:
-        if jenis == "weekday":
-            parts = list(map(int, message.text.split()))
+        if waiting == "weekday":
+            parts = list(map(int, text.split()))
             if len(parts) != 3:
                 bot.send_message(chat_id, "❌ Format salah. Contoh: 2 1 0")
                 return
@@ -229,14 +254,14 @@ def handle_user_input(message):
             session["weekday"] += total
             bot.send_message(chat_id, reply + f"\n✅ Total Weekday: RM {total:.2f}")
 
-        elif jenis == "weekend":
-            hari = int(message.text)
+        elif waiting == "weekend":
+            hari = int(text)
             subtotal = kira_ot(rate, 8, "weekend") * hari
             session["weekend"] += subtotal
             bot.send_message(chat_id, f"💰 Weekend: {hari} hari × 8j = RM {subtotal:.2f}")
 
-        elif jenis == "ph":
-            jam = float(message.text)
+        elif waiting == "ph":
+            jam = float(text)
             subtotal = kira_ot(rate, jam, "public holiday")
             session["ph"] += subtotal
             bot.send_message(chat_id, f"💰 Public Holiday: RM {subtotal:.2f}")
@@ -264,7 +289,7 @@ def home():
 
 @app.post("/webhook")
 def webhook():
-    raw = request.data.decode("utf-8")
+    raw = request.get_data(as_text=True)
     print("✅ /webhook received:", raw[:400], file=sys.stdout, flush=True)
     try:
         update = telebot.types.Update.de_json(raw)
