@@ -9,20 +9,27 @@ if not BOT_TOKEN:
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-user_sessions = {}
+# session data
+user_sessions = {}  # {chat_id: {"rate":float,"weekday":float,"weekend":float,"ph":float,"waiting_for":str|None}}
 PRESET_WEEKDAY = {"OT1": 3, "OT2": 4, "OT3": 5}
 
 def kira_ot(rate, jam, jenis):
-    rate = float(rate); jam = float(jam)
+    rate = float(rate)
+    jam = float(jam)
     if jenis == "weekday":
         return round(rate * 1.5 * jam, 2)
     elif jenis == "weekend":
-        if jam <= 4: return round(rate * 0.5 * jam, 2)
-        if jam <= 8: return round(rate * jam, 2)
-        return round((rate*8) + (rate*2*(jam-8)), 2)
+        if jam <= 4:
+            return round(rate * 0.5 * jam, 2)
+        elif jam <= 8:
+            return round(rate * jam, 2)
+        else:
+            return round((rate * 8) + (rate * 2 * (jam - 8)), 2)
     elif jenis == "public holiday":
-        if jam <= 8: return round(rate * 2 * jam, 2)
-        return round((rate*2*8) + (rate*3*(jam-8)), 2)
+        if jam <= 8:
+            return round(rate * 2 * jam, 2)
+        else:
+            return round((rate * 2 * 8) + (rate * 3 * (jam - 8)), 2)
     return 0
 
 def send_main_buttons_inline(chat_id):
@@ -46,82 +53,85 @@ def start(m):
     }
     bot.send_message(m.chat.id, "👋 Hai! Masukkan kadar OT sejam (contoh: 10.5)")
 
-@bot.message_handler(func=lambda msg: msg.text.replace(".", "", 1).isdigit() and user_sessions.get(msg.chat.id, {}).get("rate") is None)
+# TERIMA RATE — hanya jika rate belum diset
+@bot.message_handler(func=lambda msg: msg.text.replace(".", "", 1).isdigit() and (user_sessions.get(msg.chat.id, {}).get("rate") is None))
 def set_rate(m):
     rate = float(m.text)
     user_sessions[m.chat.id]["rate"] = rate
     bot.send_message(m.chat.id, f"✅ Rate diset: RM {rate:.2f}/jam")
     send_main_buttons_inline(m.chat.id)
 
+# BUTTON INLINE
 @bot.callback_query_handler(func=lambda c: True)
 def on_button(c):
     chat_id = c.message.chat.id
     s = user_sessions.get(chat_id)
-
-    if not s or s["rate"] is None:
-        bot.send_message(chat_id, "⚠️ Sila set rate dulu.")
+    if not s or s.get("rate") is None:
+        bot.send_message(chat_id, "⚠️ Sila set rate dulu (contoh: 10.5)")
         return
 
     if c.data == "weekday":
         s["waiting_for"] = "weekday"
-     bot.send_message(chat_id,
-    "Masukkan hari untuk OT1, OT2, OT3.\n"
-    "Contoh: `2 1 0`\nFormat: OT1 OT2 OT3",
-    parse_mode="Markdown"
-)
+        bot.send_message(
+            chat_id,
+            "Masukkan hari untuk OT1, OT2, OT3.\n"
+            "Contoh: `2 1 0`\n"
+            "Format: OT1 OT2 OT3",
+            parse_mode="Markdown"
+        )
 
     elif c.data == "weekend":
         s["waiting_for"] = "weekend"
-        bot.send_message(chat_id, "Masukkan bilangan hari weekend (1 hari = 8 jam). Contoh: `2`")
+        bot.send_message(
+            chat_id,
+            "Masukkan bilangan hari weekend (1 hari = 8 jam). Contoh: `2`",
+            parse_mode="Markdown"
+        )
 
     elif c.data == "ph":
         s["waiting_for"] = "ph"
-        bot.send_message(chat_id, "Masukkan jumlah jam OT Public Holiday. Contoh: `10`")
+        bot.send_message(
+            chat_id,
+            "Masukkan jumlah jam OT Public Holiday. Contoh: `9`",
+            parse_mode="Markdown"
+        )
 
     elif c.data == "total":
         total_all = s["weekday"] + s["weekend"] + s["ph"]
         bot.send_message(
             chat_id,
-            f"📊 Ringkasan OT:
-"
-            f"🏢 Weekday: RM {s['weekday']:.2f}
-"
-            f"📅 Weekend: RM {s['weekend']:.2f}
-"
-            f"🎉 Public Holiday: RM {s['ph']:.2f}
-
-"
+            f"📊 Ringkasan OT:\n"
+            f"🏢 Weekday: RM {s['weekday']:.2f}\n"
+            f"📅 Weekend: RM {s['weekend']:.2f}\n"
+            f"🎉 Public Holiday: RM {s['ph']:.2f}\n\n"
             f"💰 Total Keseluruhan: RM {total_all:.2f}"
         )
 
+# INPUT SELEPAS BUTTON (ikut waiting_for)
 @bot.message_handler(func=lambda m: True)
 def handle_inputs(m):
     chat_id = m.chat.id
     s = user_sessions.get(chat_id)
-    if not s or not s["waiting_for"]:
-        return
+    if not s or not s.get("waiting_for"):
+        return  # abaikan mesej bebas
 
     rate = s["rate"]
-
     try:
         if s["waiting_for"] == "weekday":
-            vals = list(map(int, m.text.strip().split()))
-            if len(vals) != 3:
+            parts = list(map(int, m.text.strip().split()))
+            if len(parts) != 3:
                 bot.send_message(chat_id, "❌ Format salah. Contoh: 2 1 0")
                 return
-            total = 0
-            msg = "💰 Weekday:
-"
+            total = 0.0
+            msg = "💰 Weekday:\n"
             for i, key in enumerate(["OT1", "OT2", "OT3"]):
                 jam = PRESET_WEEKDAY[key]
-                hari = vals[i]
+                hari = parts[i]
                 sub = kira_ot(rate, jam, "weekday") * hari
-                msg += f"{key} ({jam}j × {hari}h): RM {sub:.2f}
-"
+                msg += f"{key} ({jam}j × {hari}h): RM {sub:.2f}\n"
                 total += sub
             s["weekday"] += total
-            bot.send_message(chat_id, msg + f"
-✅ Total Weekday: RM {total:.2f}")
+            bot.send_message(chat_id, msg + f"\n✅ Total Weekday: RM {total:.2f}")
 
         elif s["waiting_for"] == "weekend":
             hari = int(m.text.strip())
@@ -136,25 +146,27 @@ def handle_inputs(m):
             bot.send_message(chat_id, f"💰 Public Holiday: RM {sub:.2f}")
 
     except Exception:
-        bot.send_message(chat_id, "❌ Format salah. Masukkan nombor.")
+        bot.send_message(chat_id, "❌ Format salah. Taip nombor sahaja.")
         return
     finally:
         s["waiting_for"] = None
         send_main_buttons_inline(chat_id)
 
+# === Flask (webhook) ===
 app = Flask(__name__)
 
 @app.get("/")
-def index():
+def home():
     return "Bot is running!"
 
 @app.post("/webhook")
 def webhook():
-    update = telebot.types.Update.de_json(request.data.decode("utf-8"))
+    data = request.get_data(as_text=True)
+    update = telebot.types.Update.de_json(data)
     bot.process_new_updates([update])
     return "OK", 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
-    print("✅ Flask running on port", port)
+    print("✅ Starting Flask on", port)
     app.run(host="0.0.0.0", port=port)
