@@ -11,7 +11,7 @@ if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN not set")
 
 telebot.logger.setLevel(logging.DEBUG)
-bot = telebot.TeleBot(BOT_TOKEN)
+bot = telebot.TeleBot(BOT_TOKEN)  # no global parse_mode
 
 # ==========================
 # SESSION
@@ -20,14 +20,9 @@ bot = telebot.TeleBot(BOT_TOKEN)
 user_sessions = {}
 PRESET_WEEKDAY = {"OT1": 3, "OT2": 4, "OT3": 5}
 
-# ==========================
-# UTIL
-# ==========================
 def ensure_session(cid):
     if cid not in user_sessions:
-        user_sessions[cid] = {
-            "rate": None, "weekday": 0.0, "weekend": 0.0, "ph": 0.0, "waiting_for": None
-        }
+        user_sessions[cid] = {"rate": None, "weekday": 0.0, "weekend": 0.0, "ph": 0.0, "waiting_for": None}
     return user_sessions[cid]
 
 def is_number(s: str) -> bool:
@@ -35,8 +30,7 @@ def is_number(s: str) -> bool:
         return False
     s = s.strip().replace(",", ".")
     try:
-        float(s)
-        return True
+        float(s); return True
     except ValueError:
         return False
 
@@ -94,60 +88,19 @@ def do_reset(chat_id, ask_rate=True):
         bot.send_message(chat_id, "Masukkan kadar OT sejam (contoh: 10.5)")
 
 # ==========================
-# COMMANDS (optional)
+# (Optional) COMMANDS — kekal berfungsi
 # ==========================
 @bot.message_handler(commands=["help"])
 def _h(m): send_help(m.chat.id)
 
 @bot.message_handler(commands=["reset"])
-def _r(m):
-    do_reset(m.chat.id, ask_rate=True)
+def _r(m): do_reset(m.chat.id, ask_rate=True)
 
 @bot.message_handler(commands=["ping"])
 def _p(m): bot.send_message(m.chat.id, "pong")
 
 # ==========================
-# INLINE CALLBACKS (set state)
-# ==========================
-@bot.callback_query_handler(func=lambda c: True)
-def callbacks(c):
-    cid = c.message.chat.id
-    sess = ensure_session(cid)
-    try:
-        bot.answer_callback_query(c.id)
-    except Exception as e:
-        print("answerCallback err:", e, file=sys.stderr, flush=True)
-
-    data = c.data
-    if data == "help": return send_help(cid)
-    if data == "reset":
-        do_reset(cid, ask_rate=True)
-        return
-
-    if not sess.get("rate"):
-        sess["waiting_for"] = "rate"
-        return bot.send_message(cid, "⚠️ Masukkan rate sejam dulu (cth: 10.5).")
-
-    sess["waiting_for"] = data
-    if data == "weekday":
-        bot.send_message(cid, "Masukkan hari untuk OT1, OT2, OT3.\nContoh: 2 1 0\nFormat: OT1 OT2 OT3")
-    elif data == "weekend":
-        bot.send_message(cid, "Masukkan bilangan hari weekend (1 hari = 8 jam).\nContoh: 2")
-    elif data == "ph":
-        bot.send_message(cid, "Masukkan jumlah jam OT Public Holiday.\nContoh: 10")
-    elif data == "total":
-        bot.send_message(
-            cid,
-            "📊 Ringkasan OT:\n"
-            f"🏢 Weekday: RM {sess['weekday']:.2f}\n"
-            f"📅 Weekend: RM {sess['weekend']:.2f}\n"
-            f"🎉 Public Holiday: RM {sess['ph']:.2f}\n\n"
-            f"💰 Total: RM {sess['weekday']+sess['weekend']+sess['ph']:.2f}",
-            reply_markup=main_menu()
-        )
-
-# ==========================
-# FLASK WEBHOOK — handle semua aliran utama
+# FLASK WEBHOOK — proses DIRECT: /start, rate, CALLBACK & OT inputs
 # ==========================
 app = Flask(__name__)
 
@@ -164,14 +117,51 @@ def webhook():
         if not update:
             return "OK", 200
 
-        # CALLBACK → pass ke handler callbacks()
+        # -------- CALLBACK: tamatkan spinner & respon segera --------
         if getattr(update, "callback_query", None):
             cq = update.callback_query
-            print(f"🔔 callback_query data='{cq.data}' from chat={cq.message.chat.id}", flush=True)
-            bot.process_new_updates([update])
+            chat_id = cq.message.chat.id
+            data = cq.data
+            print(f"🔔 callback_query data='{data}' from chat={chat_id}", flush=True)
+
+            try:
+                bot.answer_callback_query(cq.id)
+            except Exception as e:
+                print("answerCallback err:", repr(e), file=sys.stderr, flush=True)
+
+            sess = ensure_session(chat_id)
+
+            if data == "help":
+                send_help(chat_id);  return "OK", 200
+            if data == "reset":
+                do_reset(chat_id, ask_rate=True);  return "OK", 200
+
+            if not sess.get("rate"):
+                sess["waiting_for"] = "rate"
+                bot.send_message(chat_id, "⚠️ Masukkan rate sejam dulu (cth: 10.5).")
+                return "OK", 200
+
+            # Set state & minta input
+            sess["waiting_for"] = data
+            if data == "weekday":
+                bot.send_message(chat_id, "Masukkan hari untuk OT1, OT2, OT3.\nContoh: 2 1 0\nFormat: OT1 OT2 OT3")
+            elif data == "weekend":
+                bot.send_message(chat_id, "Masukkan bilangan hari weekend (1 hari = 8 jam).\nContoh: 2")
+            elif data == "ph":
+                bot.send_message(chat_id, "Masukkan jumlah jam OT Public Holiday.\nContoh: 10")
+            elif data == "total":
+                bot.send_message(
+                    chat_id,
+                    "📊 Ringkasan OT:\n"
+                    f"🏢 Weekday: RM {sess['weekday']:.2f}\n"
+                    f"📅 Weekend: RM {sess['weekend']:.2f}\n"
+                    f"🎉 Public Holiday: RM {sess['ph']:.2f}\n\n"
+                    f"💰 Total: RM {sess['weekday']+sess['weekend']+sess['ph']:.2f}",
+                    reply_markup=main_menu()
+                )
             return "OK", 200
 
-        # MESSAGE → urus /start, rate & input mengikut state
+        # -------- MESSAGE: /start, /ping, RATE dan INPUT MENGIKUT STATE --------
         if getattr(update, "message", None):
             t_raw = (update.message.text or "").strip()
             t = t_raw.lower()
@@ -198,7 +188,7 @@ def webhook():
                 print(f"✅ Rate set {rate} for {cid}", flush=True)
                 return "OK", 200
 
-            # 2) INPUTS ikut state (weekday/weekend/ph)
+            # 2) INPUTS ikut state (weekday / weekend / ph)
             wf = sess.get("waiting_for")
             if wf == "weekday":
                 parts = [p for p in t_raw.split() if p]
@@ -210,8 +200,8 @@ def webhook():
                 for i, key in enumerate(["OT1","OT2","OT3"]):
                     jam = PRESET_WEEKDAY[key]; hari = nums[i]
                     subtotal = kira_ot(sess["rate"], jam, "weekday") * hari
-                    total += subtotal
                     lines.append(f"{key} ({jam}j × {hari}h): RM {subtotal:.2f}")
+                    total += subtotal
                 sess["weekday"] += total
                 sess["waiting_for"] = None
                 bot.send_message(cid, "💰 Weekday:\n" + "\n".join(lines) + f"\n\n✅ Total Weekday: RM {total:.2f}", reply_markup=main_menu())
@@ -239,14 +229,12 @@ def webhook():
                 bot.send_message(cid, f"💰 Public Holiday: RM {subtotal:.2f}", reply_markup=main_menu())
                 return "OK", 200
 
-            # 3) Tiada state: jika rate ada, paparkan menu
+            # 3) Jika tiada state tetapi rate ada → paparkan menu
             if sess.get("rate") is not None:
                 send_main_buttons(cid)
                 return "OK", 200
 
-        # fallback
-        bot.process_new_updates([update])
-        print("✅ Update processed OK (fallback)", flush=True)
+        print("ℹ️ Non-handled update type, ignored.", flush=True)
     except Exception as e:
         print("❌ Error:", repr(e), file=sys.stderr, flush=True)
     return "OK", 200
