@@ -73,11 +73,11 @@ def send_help(chat_id):
         "📘 Cara guna:\n"
         "1) Taip rate sejam (cth: 12.5).\n"
         "2) Butang:\n"
-        "   • Weekday → balas `OT1 OT2 OT3` (cth: 2 1 0) — 3j/4j/5j.\n"
+        "   • Weekday → balas `OT1=3JAM, OT2=4jam, OT3=5jam` (cth: 2 1 0) — 3j/4j/5j.\n"
         "   • Weekend → balas bilangan hari (1 hari = 8 jam), cth: 2.\n"
         "   • Public Holiday → balas jumlah jam, cth: 9.\n"
         "   • Total → ringkasan.\n"
-        "Admin: @syafiqqsuhaimii",
+        "Contact Admin: @syafiqqsuhaimii",
         reply_markup=main_menu()
     )
 
@@ -144,7 +144,7 @@ def webhook():
             # Set state & minta input
             sess["waiting_for"] = data
             if data == "weekday":
-                bot.send_message(chat_id, "Masukkan hari untuk OT1, OT2, OT3.\nContoh: 2 1 0\nFormat: OT1 OT2 OT3")
+                bot.send_message(chat_id, "Masukkan hari untuk OT1=3jam, OT2=4jam, OT3=5jam.\nContoh: 2 1 0\nFormat: Perlu letak 0 jika tiada OT pada OT2 & OT3")
             elif data == "weekend":
                 bot.send_message(chat_id, "Masukkan bilangan hari weekend (1 hari = 8 jam).\nContoh: 2")
             elif data == "ph":
